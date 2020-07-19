@@ -8,16 +8,39 @@ module Duplo.Pretty
   )
   where
 
+import qualified Data.Text as Text
+import Data.Text (Text, pack)
+
 import Text.PrettyPrint
+
+-- | Pretty-print to `Text`. Through `String`. Yep.
+ppToText :: Pretty a => a -> Text
+ppToText = pack . show . pp
 
 {- | A typeclass for pretty-printable stuff.
 -}
 class Pretty p where
   pp :: p -> Doc
 
+instance Pretty () where
+  pp _ = "()"
+
+instance Pretty1 Maybe where
+  pp1 = maybe empty pp
+
+instance {-# OVERLAPS #-} (Pretty a, Pretty b) => Pretty (Either a b) where
+  pp = either pp pp
+
+instance Pretty Int where
+  pp = int
+
+-- | Common instance.
+instance Pretty Text where
+  pp = text . Text.unpack
+
+-- | Common instance.
 instance Pretty Doc where
   pp = id
-
 {- | A typeclass for pretty-printable functors.
 -}
 class Pretty1 p where

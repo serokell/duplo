@@ -6,6 +6,7 @@ dependencies:
   - fastsum
   - free
   - pretty
+  - text
   - transformers
 
 default-extensions:
