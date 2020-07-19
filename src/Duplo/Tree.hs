@@ -27,6 +27,9 @@ module Duplo.Tree
 
     -- * Lookup
   , spineTo
+
+    -- * Re-export
+  , module Data.Sum
   ) where
 
 import Control.Comonad
