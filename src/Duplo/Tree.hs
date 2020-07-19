@@ -189,6 +189,9 @@ class Monad m => Scoped i m f where
   enter :: i -> f a -> m ()
   leave :: i -> f a -> m ()
 
+  enter _ _ = return ()
+  leave _ _ = return ()
+
 {- | Convert a `Descent` into a `Scoped` Descent. -}
 usingScope :: forall a b fs gs m. (Monad m, Apply (Scoped a m) fs) => Descent fs gs a b m -> Descent fs gs a b m
 usingScope (Descent action) = Descent \(a, f) -> do
