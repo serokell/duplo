@@ -30,6 +30,8 @@ module Duplo.Tree
 
     -- * Re-export
   , module Data.Sum
+  , module Control.Comonad
+  , module Control.Comonad.Cofree
   ) where
 
 import Control.Comonad
