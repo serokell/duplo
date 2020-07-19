@@ -223,7 +223,7 @@ spineTo i = head . go []
       else do go (tree : acc) =<< trees
 
 {- | Ability to have some scoped calculations. -}
-class Monad m => Scoped i m f where
+class Monad m => Scoped i m a f where
   enter :: i -> f a -> m ()
   leave :: i -> f a -> m ()
 
@@ -235,11 +235,11 @@ skip :: Monad m => m ()
 skip = return ()
 
 {- | Convert a `Descent` into a `Scoped` Descent. -}
-usingScope :: forall a b fs gs m. (Monad m, Apply (Scoped a m) fs) => Descent fs gs a b m -> Descent fs gs a b m
+usingScope :: forall a b fs gs m. (Monad m, Apply (Scoped a m (Tree fs a)) fs) => Descent fs gs a b m -> Descent fs gs a b m
 usingScope (Descent actions) = Descent $ flip map actions \action (a, f) -> do
   -- So. To unpack `Apply X fs` constraint to get `X f`, ypu do `apply :: (forall g. c g => g a -> b) -> Sum fs a -> b`.
   -- The problem is, we have `f a`, not `Sum fs a`. Which I clutch up here by calling `inject @_ @fs f`.
-  apply @(Scoped a m) (enter a) (inject @_ @fs f)
+  apply @(Scoped a m (Tree fs a)) (enter a) (inject @_ @fs f)
   res <- action (a, f)
-  apply @(Scoped a m) (leave a) (inject @_ @fs f)
+  apply @(Scoped a m (Tree fs a)) (leave a) (inject @_ @fs f)
   return res
