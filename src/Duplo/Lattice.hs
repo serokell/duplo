@@ -8,3 +8,9 @@ class Eq i => Lattice i where
 
 instance Lattice () where
   leq () () = True
+
+partOrder :: Lattice l => l -> l -> Ordering
+partOrder a b | leq a b && leq b a = EQ
+partOrder a b | leq a b            = LT
+partOrder a b |            leq b a = GT
+partOrder _ _                      = error "partOrder: Non-orderable"
