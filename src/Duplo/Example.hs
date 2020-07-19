@@ -22,7 +22,8 @@ evalStrict :: forall m. Monad m => AST -> m AST
 evalStrict =
   ascent return
     [
-      Ascent $ loop' \case
+      Ascent
+        [ loop' \case
           -- if encounter "(\x ARGS -> EXPR1) EXPR2", call the former with the latter as argument
           -- "(\x ARGS -> EXPR1) EXPR2" ==> "(ARGS -> EXPR1 with x replaced by EXPR2)"
           (i, App (gist -> Lam (a : as) b) x) -> Just (i, Lam as $ subst a x b)
@@ -32,6 +33,7 @@ evalStrict =
 
           -- Everything else cannot be evaluated.
           _                                   -> Nothing
+        ]
     ]
   where
     -- Substute a variable with a program.

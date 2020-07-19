@@ -77,8 +77,10 @@ data Ascent fs gs a b m where
     .  ( Element f fs, Traversable f
        , Element g gs, Traversable g
        )
-    => ((a, f (Tree gs b)) -> m (b, g (Tree gs b)))  -- ^ 1-layer transformation
+    => [AscentHandler f g a b gs m]  -- ^ 1-layer transformation
     -> Ascent fs gs a b m
+
+type AscentHandler f g a b gs m = (a, f (Tree gs b)) -> m (Maybe (b, g (Tree gs b)))
 
 {- | Reconstruct the tree bottom-up. -}
 ascent
@@ -92,17 +94,30 @@ ascent fallback transforms = restart
   where
     restart = go transforms
 
-    go (Ascent handler : rest) tree = do
+    go (Ascent handlers : rest) tree = do
       case match tree of
         Just (i, f) -> do
-          f'        <- traverse restart f
-          (i', f'') <- handler (i, f')
-          return $ make (i', f'')
+          f' <- traverse restart f
+          tryAll handlers (i, f')
+            >>= maybe (go rest tree) return
 
         Nothing -> do
           go rest tree
 
     go [] tree = fallback tree
+
+    tryAll
+      :: forall f g
+      .  (Element g gs, Foldable g)
+      => [AscentHandler f g a b gs m]
+      -> (a, f (Tree gs b))
+      -> m (Maybe (Tree gs b))
+    tryAll (handler : handlers) (i, f) = do
+      handler (i, f) >>= \case
+        Just it -> return $ Just $ make it
+        Nothing -> tryAll handlers (i, f)
+    tryAll [] _ = return Nothing
+
 
 {- | Descending transformation from one `Tree` into another one.
 
@@ -115,8 +130,10 @@ data Descent fs gs a b m where
     .  ( Element f fs, Traversable f
        , Element g gs, Traversable g
        )
-    => ((a, f (Tree fs a)) -> m (b, g (Tree fs a)))  -- ^ 1-layer transformation
+    => [DescentHandler f g a b fs m]  -- ^ 1-layer transformation
     -> Descent fs gs a b m
+
+type DescentHandler f g a b fs m = (a, f (Tree fs a)) -> m (Maybe (b, g (Tree fs a)))
 
 {- | Reconstruct the tree top-down. -}
 descent
@@ -130,17 +147,32 @@ descent fallback transforms = restart
   where
     restart = go transforms
 
-    go (Descent handler : rest) tree = do
+    go (Descent handlers : rest) tree = do
       case match tree of
         Just (i, f) -> do
-          (i', f') <- handler (i, f)
-          f''      <- traverse restart f'
-          return $ make (i', f'')
+          tryAll handlers (i, f) >>= \case
+            Just (i', f') -> do
+              f'' <- traverse restart f'
+              return $ make (i', f'')
+            Nothing -> do
+              go rest tree
 
         Nothing -> do
           go rest tree
 
     go [] tree = fallback tree
+
+    tryAll
+      :: forall f g
+      .  (Element g gs, Foldable g)
+      => [DescentHandler f g a b fs m]
+      -> (a, f (Tree fs a))
+      -> m (Maybe (b, g (Tree fs a)))
+    tryAll (handler : handlers) (i, f) = do
+      handler (i, f) >>= \case
+        Just it -> return $ Just it
+        Nothing -> tryAll handlers (i, f)
+    tryAll [] _ = return Nothing
 
 {- | Construct a tree out of annotation and a node (with subtrees). -}
 make :: (Lattice i, Element f fs, Foldable f, Apply Functor fs) => (i, f (Tree fs i)) -> Tree fs i
@@ -167,16 +199,16 @@ gist :: Element f fs => Tree fs i -> f (Tree fs i)
 gist (_ :< f) = fromJust $ project f
 
 {- | Apply a transform until it fails. -}
-loop :: Monad m => (a -> m (Maybe a)) -> a -> m a
+loop :: Monad m => (a -> m (Maybe a)) -> a -> m (Maybe a)
 loop f = go
   where
-    go a = f a >>= maybe (return a) go
+    go a = f a >>= maybe (return $ Just a) go
 
 {- | Apply a pure transform until it fails. -}
-loop' :: Monad m => (a -> Maybe a) -> a -> m a
+loop' :: Monad m => (a -> Maybe a) -> a -> m (Maybe a)
 loop' f = return . go
   where
-    go a = maybe a go $ f a
+    go a = maybe (Just a) go $ f a
 
 {- | Construct a sequence of trees, covering given point, bottom-up. -}
 spineTo :: (Apply Foldable fs, Lattice i) => i -> Tree fs i -> [Tree fs i]
@@ -204,7 +236,7 @@ skip = return ()
 
 {- | Convert a `Descent` into a `Scoped` Descent. -}
 usingScope :: forall a b fs gs m. (Monad m, Apply (Scoped a m) fs) => Descent fs gs a b m -> Descent fs gs a b m
-usingScope (Descent action) = Descent \(a, f) -> do
+usingScope (Descent actions) = Descent $ flip map actions \action (a, f) -> do
   -- So. To unpack `Apply X fs` constraint to get `X f`, ypu do `apply :: (forall g. c g => g a -> b) -> Sum fs a -> b`.
   -- The problem is, we have `f a`, not `Sum fs a`. Which I clutch up here by calling `inject @_ @fs f`.
   apply @(Scoped a m) (enter a) (inject @_ @fs f)
