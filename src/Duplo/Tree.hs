@@ -16,6 +16,7 @@ module Duplo.Tree
   , Layers
   , Scoped (..)
   , usingScope
+  , skip
 
     -- * AST transformations
   , Ascent (..)
@@ -194,8 +195,12 @@ class Monad m => Scoped i m f where
   enter :: i -> f a -> m ()
   leave :: i -> f a -> m ()
 
-  enter _ _ = return ()
-  leave _ _ = return ()
+  enter _ _ = skip
+  leave _ _ = skip
+
+{- | Default implementation for `enter`/`leave`. -}
+skip :: Monad m => m ()
+skip = return ()
 
 {- | Convert a `Descent` into a `Scoped` Descent. -}
 usingScope :: forall a b fs gs m. (Monad m, Apply (Scoped a m) fs) => Descent fs gs a b m -> Descent fs gs a b m
