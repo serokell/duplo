@@ -10,4 +10,4 @@ data Err msg self
   deriving stock (Functor, Foldable, Traversable)
 
 instance Pretty msg => Pretty1 (Err msg) where
-  pp1 (Err msg) = "▒" <.> pp msg <.> "▓"
+  pp1 (Err msg) = color 1 (pp msg)
