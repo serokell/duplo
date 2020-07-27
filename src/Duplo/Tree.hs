@@ -224,22 +224,28 @@ spineTo i = head . go []
 
 {- | Ability to have some scoped calculations. -}
 class Monad m => Scoped i m a f where
-  enter :: i -> f a -> m ()
-  leave :: i -> f a -> m ()
+  before :: i -> f a -> m ()
+  after :: i -> f a -> m ()
 
-  enter _ _ = skip
-  leave _ _ = skip
+  before _ _ = skip
+  after _ _ = skip
 
 {- | Default implementation for `enter`/`leave`. -}
 skip :: Monad m => m ()
 skip = return ()
 
 {- | Convert a `Descent` into a `Scoped` Descent. -}
-usingScope :: forall a b fs gs m. (Monad m, Apply (Scoped a m (Tree fs a)) fs) => Descent fs gs a b m -> Descent fs gs a b m
+usingScope
+  :: forall a b fs gs m
+  .  ( Monad m
+     , Apply (Scoped a m (Tree fs a)) fs
+     )
+  => Descent fs gs a b m
+  -> Descent fs gs a b m
 usingScope (Descent actions) = Descent $ flip map actions \action (a, f) -> do
   -- So. To unpack `Apply X fs` constraint to get `X f`, ypu do `apply :: (forall g. c g => g a -> b) -> Sum fs a -> b`.
   -- The problem is, we have `f a`, not `Sum fs a`. Which I clutch up here by calling `inject @_ @fs f`.
-  apply @(Scoped a m (Tree fs a)) (enter a) (inject @_ @fs f)
+  apply @(Scoped a m (Tree fs a)) (before a) (inject @_ @fs f)
   res <- action (a, f)
-  apply @(Scoped a m (Tree fs a)) (leave a) (inject @_ @fs f)
+  apply @(Scoped a m (Tree fs a)) (after a) (inject @_ @fs f)
   return res
