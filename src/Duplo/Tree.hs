@@ -16,6 +16,7 @@ module Duplo.Tree
   , Layers
   , Scoped (..)
   , usingScope
+  , usingScope'
   , skip
 
     -- * AST transformations
@@ -134,19 +135,22 @@ data Descent fs gs a b m where
     -> Descent fs gs a b m
 
 type DescentHandler f g a b fs m = (a, f (Tree fs a)) -> m (Maybe (b, g (Tree fs a)))
+type DescentDefault fs gs a b m = ((a, Sum fs (Tree fs a)) -> m (b, Sum gs (Tree fs a)))
 
 {- | Reconstruct the tree top-down. -}
 descent
   :: forall a b fs gs m
-  .  (Monad m, Lattice b, Apply Functor gs)
-  => (Tree fs a -> m (Tree gs b))  -- ^ The default handler
+  .  (Monad m, Lattice b, Apply Functor gs, Apply Foldable gs, Apply Traversable gs)
+  => DescentDefault fs gs a b m    -- ^ The default handler
   -> [Descent fs gs a b m]         -- ^ The concrete handlers for chosen nodes
   -> Tree fs a                     -- ^ The tree to ascent.
   -> m (Tree gs b)
 descent fallback transforms = restart
   where
+    restart :: Tree fs a -> m (Tree gs b)
     restart = go transforms
 
+    go :: [Descent fs gs a b m] -> Tree fs a -> m (Tree gs b)
     go (Descent handlers : rest) tree = do
       case match tree of
         Just (i, f) -> do
@@ -160,7 +164,10 @@ descent fallback transforms = restart
         Nothing -> do
           go rest tree
 
-    go [] tree = fallback tree
+    go [] (a :< f) = do
+      (b, g) <- fallback (a, f)
+      g' <- traverse restart g
+      return $ b :< g'
 
     tryAll
       :: forall f g
@@ -248,4 +255,20 @@ usingScope (Descent actions) = Descent $ flip map actions \action (a, f) -> do
   apply @(Scoped a m (Tree fs a)) (before a) (inject @_ @fs f)
   res <- action (a, f)
   apply @(Scoped a m (Tree fs a)) (after a) (inject @_ @fs f)
+  return res
+
+{- | Convert a `Descent` into a `Scoped` Descent. -}
+usingScope'
+  :: forall a b fs gs m
+  .  ( Monad m
+     , Apply (Scoped a m (Tree fs a)) fs
+     )
+  => DescentDefault fs gs a b m
+  -> DescentDefault fs gs a b m
+usingScope' action (a, f) = do
+  -- So. To unpack `Apply X fs` constraint to get `X f`, ypu do `apply :: (forall g. c g => g a -> b) -> Sum fs a -> b`.
+  -- The problem is, we have `f a`, not `Sum fs a`. Which I clutch up here by calling `inject @_ @fs f`.
+  apply @(Scoped a m (Tree fs a)) (before a) f
+  res <- action (a, f)
+  apply @(Scoped a m (Tree fs a)) (after a) f
   return res
