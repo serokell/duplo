@@ -24,6 +24,7 @@ module Duplo.Tree
   , ascent
   , Descent (..)
   , descent
+  , leaveBe
   , loop
   , loop'
 
@@ -272,3 +273,14 @@ usingScope' action restart tree@(a :< f) = do
   res <- action restart tree
   apply @(Scoped a m (Tree fs a)) (after a) f
   return res
+
+leaveBe
+  :: ( Monad m
+     , Apply Foldable fs
+     , Apply Functor fs
+     , Apply Traversable fs
+     )
+  => DescentDefault fs fs a a m
+leaveBe restart (a :< f) = do
+  f' <- traverse restart f
+  return (a :< f')
