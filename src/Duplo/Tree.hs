@@ -135,7 +135,9 @@ data Descent fs gs a b m where
     -> Descent fs gs a b m
 
 type DescentHandler f g a b fs m = (a, f (Tree fs a)) -> m (Maybe (b, g (Tree fs a)))
-type DescentDefault fs gs a b m = ((a, Sum fs (Tree fs a)) -> m (b, Sum gs (Tree fs a)))
+type DescentDefault fs gs a b m
+  =  (Tree fs a -> m (Tree gs b))
+  ->  Tree fs a -> m (Tree gs b)
 
 {- | Reconstruct the tree top-down. -}
 descent
@@ -164,10 +166,8 @@ descent fallback transforms = restart
         Nothing -> do
           go rest tree
 
-    go [] (a :< f) = do
-      (b, g) <- fallback (a, f)
-      g' <- traverse restart g
-      return $ b :< g'
+    go [] tree = do
+      fallback restart tree
 
     tryAll
       :: forall f g
@@ -265,10 +265,10 @@ usingScope'
      )
   => DescentDefault fs gs a b m
   -> DescentDefault fs gs a b m
-usingScope' action (a, f) = do
+usingScope' action restart tree@(a :< f) = do
   -- So. To unpack `Apply X fs` constraint to get `X f`, ypu do `apply :: (forall g. c g => g a -> b) -> Sum fs a -> b`.
   -- The problem is, we have `f a`, not `Sum fs a`. Which I clutch up here by calling `inject @_ @fs f`.
   apply @(Scoped a m (Tree fs a)) (before a) f
-  res <- action (a, f)
+  res <- action restart tree
   apply @(Scoped a m (Tree fs a)) (after a) f
   return res
