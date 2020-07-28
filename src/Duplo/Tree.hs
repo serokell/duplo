@@ -24,6 +24,7 @@ module Duplo.Tree
   , ascent
   , Descent (..)
   , descent
+  , changeInfo
   , leaveBe
   , loop
   , loop'
@@ -181,18 +182,21 @@ descent fallback transforms = restart
         Just it -> return $ Just it
         Nothing -> tryAll handlers (i, f)
     tryAll [] _ = return Nothing
+{-# INLINE descent #-}
 
 {- | Construct a tree out of annotation and a node (with subtrees). -}
 make :: (Lattice i, Element f fs, Foldable f, Apply Functor fs) => (i, f (Tree fs i)) -> Tree fs i
 make (i, f)
   | any (not . (`leq` i)) (extract <$> toList f) = error "Tree.make: Subtrees must be less of equal"
   | otherwise                                    = i :< inject f
+{-# INLINE make #-}
 
 {- | Attempt extraction of info and node from current root. -}
 match :: Element f fs => Tree fs i -> Maybe (i, f (Tree fs i))
 match (i :< f) = do
   f' <- project f
   return (i, f')
+{-# INLINE match #-}
 
 {- | Attempt extraction of node from current root. -}
 layer :: Element f fs => Tree fs i -> Maybe (f (Tree fs i))
@@ -257,6 +261,7 @@ usingScope (Descent actions) = Descent $ flip map actions \action (a, f) -> do
   res <- action (a, f)
   apply @(Scoped a m (Tree fs a)) (after a) (inject @_ @fs f)
   return res
+{-# INLINE usingScope #-}
 
 {- | Convert a `Descent` into a `Scoped` Descent. -}
 usingScope'
@@ -273,6 +278,7 @@ usingScope' action restart tree@(a :< f) = do
   res <- action restart tree
   apply @(Scoped a m (Tree fs a)) (after a) f
   return res
+{-# INLINE usingScope' #-}
 
 leaveBe
   :: ( Monad m
@@ -284,3 +290,17 @@ leaveBe
 leaveBe restart (a :< f) = do
   f' <- traverse restart f
   return (a :< f')
+{-# INLINE leaveBe #-}
+
+changeInfo
+  :: ( Monad m
+     , Apply Foldable fs
+     , Apply Functor fs
+     , Apply Traversable fs
+     )
+  => (a -> b)
+  -> DescentDefault fs fs a b m
+changeInfo mapper restart (a :< f) = do
+  f' <- traverse restart f
+  return (mapper a :< f')
+{-# INLINE changeInfo #-}
