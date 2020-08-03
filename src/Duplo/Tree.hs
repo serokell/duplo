@@ -32,6 +32,7 @@ module Duplo.Tree
     -- * AST Folding
   , Visit (..)
   , visit
+  , collect
 
     -- * Lookup
   , spineTo
@@ -340,3 +341,10 @@ changeInfo mapper restart (a :< f) = do
   f' <- traverse restart f
   return (mapper a :< f')
 {-# INLINE changeInfo #-}
+
+collect :: (Element f fs, Apply Foldable fs) => Tree fs a -> [(a, f (Tree fs a))]
+collect tree@(_ :< f) =
+  foldMap collect f <>
+    case match tree of
+      Just it -> [it]
+      Nothing -> []

@@ -11,7 +11,7 @@ module Duplo.Pretty
 import qualified Data.Text as Text
 import Data.Text (Text, pack)
 
-import Text.PrettyPrint
+import Text.PrettyPrint hiding ((<>))
 
 -- | Pretty-print to `Text`. Through `String`. Yep.
 ppToText :: Pretty a => a -> Text
@@ -74,7 +74,7 @@ instance Modifies () where
 -}
 infixl 6 <.>
 (<.>) :: Doc -> Doc -> Doc
-(<.>) = (Text.PrettyPrint.<>)
+(<.>) = (<>)
 
 -- | Colorize a `Doc`.
 color :: Int -> Doc -> Doc
