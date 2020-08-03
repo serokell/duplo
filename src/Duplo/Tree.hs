@@ -29,6 +29,10 @@ module Duplo.Tree
   , loop
   , loop'
 
+    -- * AST Folding
+  , Visit (..)
+  , visit
+
     -- * Lookup
   , spineTo
 
@@ -183,6 +187,38 @@ descent fallback transforms = restart
         Nothing -> tryAll handlers (i, f)
     tryAll [] _ = return Nothing
 {-# INLINE descent #-}
+
+data Visit fs a m where
+  {- | Wrap the node (the adecent is for), by forgetting its type. -}
+  Visit
+    :: forall f fs a m
+    .  ( Element f fs, Foldable f
+       )
+    => VisitHandler f a fs m  -- ^ 1-layer transformation
+    -> Visit fs a m
+
+type VisitHandler f a fs m = (a, f (Tree fs a)) -> m ()
+type VisitDefault fs a m = (Tree fs a -> m ()) -> Tree fs a -> m ()
+
+visit
+  :: forall a fs m
+  .  (Monad m, Apply Foldable fs)
+  => VisitDefault fs a m    -- ^ The default handler
+  -> [Visit fs a m]         -- ^ The concrete handlers for chosen nodes
+  -> Tree fs a                     -- ^ The tree to ascent.
+  -> m ()
+visit orElse visitors = restart
+  where
+    restart = go visitors
+
+    go (Visit handler : rest) tree = do
+      case match tree of
+        Just (a, f) -> do
+          handler (a, f)
+          for_ f restart
+        Nothing -> go rest tree
+    go [] tree = do
+      orElse restart tree
 
 {- | Construct a tree out of annotation and a node (with subtrees). -}
 make :: (Lattice i, Element f fs, Foldable f, Apply Functor fs) => (i, f (Tree fs i)) -> Tree fs i
