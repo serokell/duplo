@@ -258,8 +258,8 @@ spineTo covers = head . go []
         fail ""
 
       if null trees
-      then do return acc
-      else do go (tree : acc) =<< trees
+      then do return (tree : acc)
+      else do go     (tree : acc) =<< trees
 
 {- | Ability to have some scoped calculations. -}
 class Monad m => Scoped i m a f where
