@@ -20,8 +20,8 @@ module Duplo.Tree
   , skip
 
     -- * AST transformations
-  , Ascent (..)
-  , ascent
+  -- , Ascent (..)
+  -- , ascent
   , Descent (..)
   , descent
   , changeInfo
@@ -46,6 +46,7 @@ module Duplo.Tree
 import Control.Comonad
 import Control.Comonad.Cofree
 import Control.Monad
+import Control.Monad.Catch
 
 import Data.Foldable
 import Data.Maybe
@@ -74,58 +75,57 @@ type Layers fs =
 instance (Layers layers, Modifies info) => Pretty (Tree layers info) where
   pp (d :< f) = ascribe d $ pp1 $ fmap pp f
 
-{- | Ascending transformation from one `Tree` into another one.
+-- {- | Ascending transformation from one `Tree` into another one.
 
-     Converts both @info@ and @layers@.
--}
-data Ascent fs gs a b m where
-  {- | Wrap the node (the ascent is for), by forgetting its type. -}
-  Ascent
-    :: forall f g fs gs a b m
-    .  ( Element f fs, Traversable f
-       , Element g gs, Traversable g
-       )
-    => [AscentHandler f g a b gs m]  -- ^ 1-layer transformation
-    -> Ascent fs gs a b m
+--      Converts both @info@ and @layers@.
+-- -}
+-- data Ascent fs gs a b m where
+--   {- | Wrap the node (the ascent is for), by forgetting its type. -}
+--   Ascent
+--     :: forall f g fs gs a b m
+--     .  ( Element f fs, Traversable f
+--        , Element g gs, Traversable g
+--        )
+--     => [AscentHandler f g a b gs m]  -- ^ 1-layer transformation
+--     -> Ascent fs gs a b m
 
-type AscentHandler f g a b gs m = (a, f (Tree gs b)) -> m (Maybe (b, g (Tree gs b)))
+-- type AscentHandler f g a b gs m = (a, f (Tree gs b)) -> m (Maybe (b, g (Tree gs b)))
 
-{- | Reconstruct the tree bottom-up. -}
-ascent
-  :: forall a b fs gs m
-  .  (Monad m, Lattice b, Apply Functor gs)
-  => (Tree fs a -> m (Tree gs b))  -- ^ The default handler.
-  -> [Ascent fs gs a b m]          -- ^ The concrete handlers for chosen node types.
-  -> Tree fs a                     -- ^ The tree to ascent.
-  -> m (Tree gs b)
-ascent fallback transforms = restart
-  where
-    restart = go transforms
+-- {- | Reconstruct the tree bottom-up. -}
+-- ascent
+--   :: forall a b fs gs m
+--   .  (Monad m, Lattice b, Apply Functor gs)
+--   => (Tree fs a -> m (Tree gs b))  -- ^ The default handler.
+--   -> [Ascent fs gs a b m]          -- ^ The concrete handlers for chosen node types.
+--   -> Tree fs a                     -- ^ The tree to ascent.
+--   -> m (Tree gs b)
+-- ascent fallback transforms = restart
+--   where
+--     restart = go transforms
 
-    go (Ascent handlers : rest) tree = do
-      case match tree of
-        Just (i, f) -> do
-          f' <- traverse restart f
-          tryAll handlers (i, f')
-            >>= maybe (go rest tree) return
+--     go (Ascent handlers : rest) tree = do
+--       case match tree of
+--         Just (i, f) -> do
+--           f' <- traverse restart f
+--           tryAll handlers (i, f')
+--             >>= maybe (go rest tree) return
 
-        Nothing -> do
-          go rest tree
+--         Nothing -> do
+--           go rest tree
 
-    go [] tree = fallback tree
+--     go [] tree = fallback tree
 
-    tryAll
-      :: forall f g
-      .  (Element g gs, Foldable g)
-      => [AscentHandler f g a b gs m]
-      -> (a, f (Tree gs b))
-      -> m (Maybe (Tree gs b))
-    tryAll (handler : handlers) (i, f) = do
-      handler (i, f) >>= \case
-        Just it -> return $ Just $ make it
-        Nothing -> tryAll handlers (i, f)
-    tryAll [] _ = return Nothing
-
+--     tryAll
+--       :: forall f g
+--       .  (Element g gs, Foldable g)
+--       => [AscentHandler f g a b gs m]
+--       -> (a, f (Tree gs b))
+--       -> m (Maybe (Tree gs b))
+--     tryAll (handler : handlers) (i, f) = do
+--       handler (i, f) >>= \case
+--         Just it -> return $ Just $ make it
+--         Nothing -> tryAll handlers (i, f)
+--     tryAll [] _ = return Nothing
 
 {- | Descending transformation from one `Tree` into another one.
 
@@ -138,18 +138,22 @@ data Descent fs gs a b m where
     .  ( Element f fs, Traversable f
        , Element g gs, Traversable g
        )
-    => [DescentHandler f g a b fs m]  -- ^ 1-layer transformation
+    => DescentHandler f g a b fs m  -- ^ 1-layer transformation
     -> Descent fs gs a b m
 
-type DescentHandler f g a b fs m = (a, f (Tree fs a)) -> m (Maybe (b, g (Tree fs a)))
+type DescentHandler f g a b fs m = (a, f (Tree fs a)) -> m (b, g (Tree fs a))
 type DescentDefault fs gs a b m
   =  (Tree fs a -> m (Tree gs b))
   ->  Tree fs a -> m (Tree gs b)
 
+data HandlerFailed = HandlerFailed
+  deriving stock Show
+  deriving anyclass Exception
+
 {- | Reconstruct the tree top-down. -}
 descent
   :: forall a b fs gs m
-  .  (Monad m, Lattice b, Apply Functor gs, Apply Foldable gs, Apply Traversable gs)
+  .  (MonadCatch m, Lattice b, Apply Functor gs, Apply Foldable gs, Apply Traversable gs)
   => DescentDefault fs gs a b m    -- ^ The default handler
   -> [Descent fs gs a b m]         -- ^ The concrete handlers for chosen nodes
   -> Tree fs a                     -- ^ The tree to ascent.
@@ -160,33 +164,16 @@ descent fallback transforms = restart
     restart = go transforms
 
     go :: [Descent fs gs a b m] -> Tree fs a -> m (Tree gs b)
-    go (Descent handlers : rest) tree = do
-      case match tree of
-        Just (i, f) -> do
-          tryAll handlers (i, f) >>= \case
-            Just (i', f') -> do
-              f'' <- traverse restart f'
-              return $ make (i', f'')
-            Nothing -> do
-              go rest tree
-
-        Nothing -> do
-          go rest tree
+    go (Descent handler : rest) tree = do
+        (i,  f)  <- matchOrFail tree
+        (i', f') <- handler (i, f)
+        f''      <- traverse restart f'
+        return $ make (i', f'')
+      `catch` \HandlerFailed -> do
+        go rest tree
 
     go [] tree = do
       fallback restart tree
-
-    tryAll
-      :: forall f g
-      .  (Element g gs, Foldable g)
-      => [DescentHandler f g a b fs m]
-      -> (a, f (Tree fs a))
-      -> m (Maybe (b, g (Tree fs a)))
-    tryAll (handler : handlers) (i, f) = do
-      handler (i, f) >>= \case
-        Just it -> return $ Just it
-        Nothing -> tryAll handlers (i, f)
-    tryAll [] _ = return Nothing
 {-# INLINE descent #-}
 
 data Visit fs a m where
@@ -199,27 +186,25 @@ data Visit fs a m where
     -> Visit fs a m
 
 type VisitHandler f a fs m = (a, f (Tree fs a)) -> m ()
-type VisitDefault fs a m = (Tree fs a -> m ()) -> Tree fs a -> m ()
 
 visit
   :: forall a fs m
-  .  (Monad m, Apply Foldable fs)
-  => VisitDefault fs a m    -- ^ The default handler
-  -> [Visit fs a m]         -- ^ The concrete handlers for chosen nodes
+  .  (MonadCatch m, Apply Foldable fs)
+  => [Visit fs a m]         -- ^ The concrete handlers for chosen nodes
   -> Tree fs a                     -- ^ The tree to ascent.
   -> m ()
-visit orElse visitors = restart
+visit visitors = restart
   where
     restart = go visitors
 
     go (Visit handler : rest) tree = do
-      case match tree of
-        Just (a, f) -> do
-          handler (a, f)
-          for_ f restart
-        Nothing -> go rest tree
-    go [] tree = do
-      orElse restart tree
+        (a, f) <- matchOrFail tree
+        handler (a, f)
+        for_ f restart
+      `catch` \HandlerFailed -> do
+        go rest tree
+    go [] (_ :< f) = do
+      for_ f restart
 
 {- | Construct a tree out of annotation and a node (with subtrees). -}
 make :: (Lattice i, Element f fs, Foldable f, Apply Functor fs) => (i, f (Tree fs i)) -> Tree fs i
@@ -234,6 +219,10 @@ match (i :< f) = do
   f' <- project f
   return (i, f')
 {-# INLINE match #-}
+
+matchOrFail :: (Element f fs, MonadThrow m) => Tree fs i -> m (i, f (Tree fs i))
+matchOrFail = maybe (throwM HandlerFailed) return . match
+{-# INLINE matchOrFail #-}
 
 {- | Attempt extraction of node from current root. -}
 layer :: Element f fs => Tree fs i -> Maybe (f (Tree fs i))
@@ -291,7 +280,7 @@ usingScope
      )
   => Descent fs gs a b m
   -> Descent fs gs a b m
-usingScope (Descent actions) = Descent $ flip map actions \action (a, f) -> do
+usingScope (Descent action) = Descent $ \(a, f) -> do
   -- So. To unpack `Apply X fs` constraint to get `X f`, ypu do `apply :: (forall g. c g => g a -> b) -> Sum fs a -> b`.
   -- The problem is, we have `f a`, not `Sum fs a`. Which I clutch up here by calling `inject @_ @fs f`.
   apply @(Scoped a m (Tree fs a)) (before a) (inject @_ @fs f)

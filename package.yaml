@@ -3,6 +3,7 @@ name: duplo
 dependencies:
   - comonad
   - base
+  - exceptions
   - fastsum
   - free
   - pretty
@@ -16,6 +17,7 @@ default-extensions:
   - BlockArguments
   - ConstraintKinds
   - DataKinds
+  - DeriveAnyClass
   - DeriveFoldable
   - DeriveFunctor
   - DeriveTraversable
