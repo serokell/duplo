@@ -23,6 +23,7 @@ module Duplo.Tree
   -- , Ascent (..)
   -- , ascent
   , Descent (..)
+  , HandlerFailed (..)
   , descent
   , changeInfo
   , leaveBe
