@@ -251,7 +251,10 @@ loop' f = return . go
 
 {- | Construct a sequence of trees, covering given point, bottom-up. -}
 spineTo :: (Apply Foldable fs, Lattice i) => (i -> Bool) -> Tree fs i -> [Tree fs i]
-spineTo covers = head . go []
+spineTo covers tree =
+  case go [] tree of
+    x : _ -> x
+    []    -> []
   where
     go acc tree@(i' :< (toList -> trees)) = do
       unless (covers i') do
