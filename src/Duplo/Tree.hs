@@ -219,7 +219,7 @@ layer :: Element f fs => Tree fs i -> Maybe (f (Tree fs i))
 layer (_ :< f) = project f
 
 {- | Attempt unsafe extraction of info and node from current root. -}
-only :: Element f fs => Tree fs i -> (i, f (Tree fs i))
+only :: Tree '[f] i -> (i, f (Tree '[f] i))
 only (i :< f) = (i, fromJust $ project f)
 
 {- | Attempt unsafe extraction of node from current root. -}
