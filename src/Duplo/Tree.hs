@@ -29,6 +29,8 @@ module Duplo.Tree
   , leaveBe
   , loop
   , loop'
+  , Descent' (..)
+  , descent'
 
     -- * AST Folding
   , Visit (..)
@@ -44,6 +46,7 @@ module Duplo.Tree
   , module Control.Comonad.Cofree
   ) where
 
+import Control.Applicative
 import Control.Comonad
 import Control.Comonad.Cofree
 import Control.Monad
@@ -75,58 +78,6 @@ type Layers fs =
 
 instance (Layers layers, Modifies info) => Pretty (Tree layers info) where
   pp (d :< f) = ascribe d $ pp1 $ fmap pp f
-
--- {- | Ascending transformation from one `Tree` into another one.
-
---      Converts both @info@ and @layers@.
--- -}
--- data Ascent fs gs a b m where
---   {- | Wrap the node (the ascent is for), by forgetting its type. -}
---   Ascent
---     :: forall f g fs gs a b m
---     .  ( Element f fs, Traversable f
---        , Element g gs, Traversable g
---        )
---     => [AscentHandler f g a b gs m]  -- ^ 1-layer transformation
---     -> Ascent fs gs a b m
-
--- type AscentHandler f g a b gs m = (a, f (Tree gs b)) -> m (Maybe (b, g (Tree gs b)))
-
--- {- | Reconstruct the tree bottom-up. -}
--- ascent
---   :: forall a b fs gs m
---   .  (Monad m, Lattice b, Apply Functor gs)
---   => (Tree fs a -> m (Tree gs b))  -- ^ The default handler.
---   -> [Ascent fs gs a b m]          -- ^ The concrete handlers for chosen node types.
---   -> Tree fs a                     -- ^ The tree to ascent.
---   -> m (Tree gs b)
--- ascent fallback transforms = restart
---   where
---     restart = go transforms
-
---     go (Ascent handlers : rest) tree = do
---       case match tree of
---         Just (i, f) -> do
---           f' <- traverse restart f
---           tryAll handlers (i, f')
---             >>= maybe (go rest tree) return
-
---         Nothing -> do
---           go rest tree
-
---     go [] tree = fallback tree
-
---     tryAll
---       :: forall f g
---       .  (Element g gs, Foldable g)
---       => [AscentHandler f g a b gs m]
---       -> (a, f (Tree gs b))
---       -> m (Maybe (Tree gs b))
---     tryAll (handler : handlers) (i, f) = do
---       handler (i, f) >>= \case
---         Just it -> return $ Just $ make it
---         Nothing -> tryAll handlers (i, f)
---     tryAll [] _ = return Nothing
 
 {- | Descending transformation from one `Tree` into another one.
 
@@ -176,6 +127,47 @@ descent fallback transforms = restart
     go [] tree = do
       fallback restart tree
 {-# INLINE descent #-}
+
+data Descent' fs gs a b where
+  {- | Wrap the node (the adecent is for), by forgetting its type. -}
+  Descent'
+    :: forall f g fs gs a b
+    .  ( Element f fs, Traversable f
+       , Element g gs, Traversable g
+       )
+    => DescentHandler' f g a b fs  -- ^ 1-layer transformation
+    -> Descent' fs gs a b
+
+type DescentHandler' f g a b fs = (a,     f  (Tree fs a)) -> (b,     g  (Tree fs a))
+type DescentDefault' fs gs a b  = (a, Sum fs (Tree fs a)) -> (b, Sum gs (Tree fs a))
+
+{- | Reconstruct the tree top-down. -}
+descent'
+  :: forall a b fs gs
+  .  (Lattice b, Apply Functor gs, Apply Foldable gs, Apply Traversable gs)
+  => DescentDefault' fs gs a b    -- ^ The default handler
+  -> [Descent' fs gs a b]         -- ^ The concrete handlers for chosen nodes
+  -> Tree fs a                   -- ^ The tree to ascent.
+  -> Tree gs b
+descent' fallback transforms = restart
+  where
+    restart :: Tree fs a -> Tree gs b
+    restart = fromJust . go transforms
+
+    go :: [Descent' fs gs a b] -> Tree fs a -> Maybe (Tree gs b)
+    go (Descent' handler : rest) tree = do
+        (i,  f)  <- match tree
+        let (i', f') = handler (i, f)
+        let f''      = fmap restart f'
+        return $ make (i', f'')
+      <|>
+        go rest tree
+
+    go [] (r :< tree) = do
+      let (r', tree') = fallback (r, tree)
+      return $ (r' :< fmap restart tree')
+
+{-# INLINE descent' #-}
 
 data Visit fs a m where
   {- | Wrap the node (the adecent is for), by forgetting its type. -}
@@ -256,13 +248,13 @@ spineTo covers tree =
     x : _ -> x
     []    -> []
   where
-    go acc tree@(i' :< (toList -> trees)) = do
+    go acc tree'@(i' :< (toList -> trees)) = do
       unless (covers i') do
         fail ""
 
       if null trees
-      then do return (tree : acc)
-      else do go     (tree : acc) =<< trees
+      then do return (tree' : acc)
+      else do go     (tree' : acc) =<< trees
 
 {- | Ability to have some scoped calculations. -}
 class Monad m => Scoped i m a f where
