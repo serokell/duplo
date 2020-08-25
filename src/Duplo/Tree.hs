@@ -29,8 +29,8 @@ module Duplo.Tree
   , leaveBe
   , loop
   , loop'
-  , Descent' (..)
-  , descent'
+  , Ascent' (..)
+  , ascent'
 
     -- * AST Folding
   , Visit (..)
@@ -128,46 +128,43 @@ descent fallback transforms = restart
       fallback restart tree
 {-# INLINE descent #-}
 
-data Descent' fs gs a b where
+data Ascent' fs gs a b where
   {- | Wrap the node (the adecent is for), by forgetting its type. -}
-  Descent'
+  Ascent'
     :: forall f g fs gs a b
     .  ( Element f fs, Traversable f
        , Element g gs, Traversable g
        )
-    => DescentHandler' f g a b fs  -- ^ 1-layer transformation
-    -> Descent' fs gs a b
+    => AscentHandler' f gs a b  -- ^ 1-layer transformation
+    -> Ascent' fs gs a b
 
-type DescentHandler' f g a b fs = (a,     f  (Tree fs a)) -> (b,     g  (Tree fs a))
-type DescentDefault' fs gs a b  = (a, Sum fs (Tree fs a)) -> (b, Sum gs (Tree fs a))
+type AscentHandler' f  gs a b  = (a,     f  (Tree gs b)) -> Tree gs b
+type AscentDefault' fs gs a b  = (a, Sum fs (Tree gs b)) -> Tree gs b
 
 {- | Reconstruct the tree top-down. -}
-descent'
+ascent'
   :: forall a b fs gs
-  .  (Lattice b, Apply Functor gs, Apply Foldable gs, Apply Traversable gs)
-  => DescentDefault' fs gs a b    -- ^ The default handler
-  -> [Descent' fs gs a b]         -- ^ The concrete handlers for chosen nodes
+  .  (Lattice b, Apply Functor fs)
+  => AscentDefault' fs gs a b    -- ^ The default handler
+  -> [Ascent' fs gs a b]         -- ^ The concrete handlers for chosen nodes
   -> Tree fs a                   -- ^ The tree to ascent.
   -> Tree gs b
-descent' fallback transforms = restart
+ascent' fallback transforms = restart
   where
     restart :: Tree fs a -> Tree gs b
-    restart = fromJust . go transforms
+    restart (r :< f) = fromJust $ go transforms (r, fmap restart f)
 
-    go :: [Descent' fs gs a b] -> Tree fs a -> Maybe (Tree gs b)
-    go (Descent' handler : rest) tree = do
-        (i,  f)  <- match tree
-        let (i', f') = handler (i, f)
-        let f''      = fmap restart f'
-        return $ make (i', f'')
+    go :: [Ascent' fs gs a b] -> (a, Sum fs (Tree gs b)) -> Maybe (Tree gs b)
+    go (Ascent' handler : rest) (i, f) = do
+        f' <- project f
+        return $ handler (i, f')
       <|>
-        go rest tree
+        go rest (i, f)
 
-    go [] (r :< tree) = do
-      let (r', tree') = fallback (r, tree)
-      return $ (r' :< fmap restart tree')
+    go [] (r, tree) = do
+      return $ fallback (r, tree)
 
-{-# INLINE descent' #-}
+{-# INLINE ascent' #-}
 
 data Visit fs a m where
   {- | Wrap the node (the adecent is for), by forgetting its type. -}
