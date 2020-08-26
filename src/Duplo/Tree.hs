@@ -39,6 +39,7 @@ module Duplo.Tree
 
     -- * Lookup
   , spineTo
+  , findAndUpdateFrom
 
     -- * Re-export
   , module Data.Sum
@@ -252,6 +253,28 @@ spineTo covers tree =
       if null trees
       then do return (tree' : acc)
       else do go     (tree' : acc) =<< trees
+
+-- | Locate the point and attepmt update on spine up from that point.
+findAndUpdateFrom
+  :: (Lattice i, Apply Functor fs, Apply Foldable fs)
+  => (i -> Bool) -- Locator
+  -> (Tree fs i -> Maybe (Tree fs i))
+  ->  Tree fs i -> Tree fs i
+findAndUpdateFrom covers f = fst . go
+  where
+    go (i :< fs)
+      | covers i = do
+        let subs = fmap go fs
+        let succeed = any snd subs
+        if succeed
+        then (i :< fmap fst subs, True)
+        else orLeaveAsIs f (i :< fs)
+
+      | otherwise =
+        (i :< fs, False)
+
+orLeaveAsIs :: (a -> Maybe a) -> (a -> (a, Bool))
+orLeaveAsIs f a = maybe (a, False) (, True) (f a)
 
 {- | Ability to have some scoped calculations. -}
 class Monad m => Scoped i m a f where
