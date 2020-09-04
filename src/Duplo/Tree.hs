@@ -258,8 +258,8 @@ spineTo covers tree =
 findAndUpdateFrom
   :: (Lattice i, Apply Functor fs, Apply Foldable fs)
   => (i -> Bool) -- Locator
-  -> (Tree fs i -> Maybe (Tree fs i))
-  ->  Tree fs i -> Tree fs i
+  -> (i -> Maybe i)
+  -> Tree fs i -> Tree fs i
 findAndUpdateFrom covers f = fst . go
   where
     go (i :< fs)
@@ -268,10 +268,14 @@ findAndUpdateFrom covers f = fst . go
         let succeed = any snd subs
         if succeed
         then (i :< fmap fst subs, True)
-        else orLeaveAsIs f (i :< fs)
+        else orLeaveAsIs updateRoot (i :< fs)
 
       | otherwise =
         (i :< fs, False)
+
+    updateRoot (a :< fs) = do
+      a' <- f a
+      return (a' :< fs)
 
 orLeaveAsIs :: (a -> Maybe a) -> (a -> (a, Bool))
 orLeaveAsIs f a = maybe (a, False) (, True) (f a)
