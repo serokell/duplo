@@ -1,0 +1,36 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.33.0.
+--
+-- see: https://github.com/sol/hpack
+--
+-- hash: 3fad7e4a3021371fb1d3737f6267eaf5f538392ba22884ebd53a5a333c54d681
+
+name:           duplo
+version:        0.0.0
+build-type:     Simple
+
+library
+  exposed-modules:
+      Duplo
+      Duplo.Error
+      Duplo.Example
+      Duplo.Lattice
+      Duplo.Pretty
+      Duplo.Tree
+  other-modules:
+      Paths_duplo
+  hs-source-dirs:
+      src/
+  default-extensions: AllowAmbiguousTypes ApplicativeDo BangPatterns BlockArguments ConstraintKinds DataKinds DeriveAnyClass DeriveFoldable DeriveFunctor DeriveTraversable DerivingStrategies DerivingVia EmptyCase FlexibleContexts FlexibleInstances FunctionalDependencies GADTs GeneralisedNewtypeDeriving LambdaCase MagicHash MultiParamTypeClasses NamedFieldPuns OverloadedStrings QuasiQuotes RankNTypes ScopedTypeVariables StandaloneDeriving TemplateHaskell TupleSections TypeApplications TypeFamilies TypeOperators UndecidableInstances ViewPatterns
+  ghc-options: -freverse-errors -Wall -threaded
+  build-depends:
+      base
+    , comonad
+    , exceptions
+    , fastsum
+    , free
+    , pretty
+    , text
+    , transformers
+  default-language: Haskell2010

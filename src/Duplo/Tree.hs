@@ -50,7 +50,6 @@ module Duplo.Tree
 import Control.Applicative
 import Control.Comonad
 import Control.Comonad.Cofree
-import Control.Monad
 import Control.Monad.Catch
 
 import Data.Foldable
@@ -241,18 +240,13 @@ loop' f = return . go
 
 {- | Construct a sequence of trees, covering given point, bottom-up. -}
 spineTo :: (Apply Foldable fs, Lattice i) => (i -> Bool) -> Tree fs i -> [Tree fs i]
-spineTo covers tree =
-  case go [] tree of
-    x : _ -> x
-    []    -> []
+spineTo doesCover = go []
   where
-    go acc tree'@(i' :< (toList -> trees)) = do
-      unless (covers i') do
-        fail ""
-
-      if null trees
-      then do return (tree' : acc)
-      else do go     (tree' : acc) =<< trees
+    go acc branch@(info :< (toList -> children))
+      | doesCover info = case concatMap (go (branch : acc)) children of
+          [] -> branch : acc
+          deeperRes -> deeperRes
+      | otherwise = []
 
 -- | Locate the point and attepmt update on spine up from that point.
 findAndUpdateFrom
