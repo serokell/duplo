@@ -240,12 +240,10 @@ loop' f = return . go
 
 {- | Construct a sequence of trees, covering given point, bottom-up. -}
 spineTo :: (Apply Foldable fs, Lattice i) => (i -> Bool) -> Tree fs i -> [Tree fs i]
-spineTo doesCover = go []
+spineTo doesCover = reverse . go
   where
-    go acc branch@(info :< (toList -> children))
-      | doesCover info = case concatMap (go (branch : acc)) children of
-          [] -> branch : acc
-          deeperRes -> deeperRes
+    go branch@(info :< children)
+      | doesCover info = branch : concatMap go children
       | otherwise = []
 
 -- | Locate the point and attepmt update on spine up from that point.
