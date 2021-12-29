@@ -113,7 +113,7 @@ data HandlerFailed e
 {- | Reconstruct the tree top-down. -}
 descent
   :: forall a b fs gs e m
-  .  (MonadError (HandlerFailed e) m, Lattice b, Apply Functor gs, Apply Foldable gs, Apply Traversable gs)
+  .  MonadError (HandlerFailed e) m
   => DescentDefault fs gs a b m    -- ^ The default handler
   -> [Descent fs gs a b m]         -- ^ The concrete handlers for chosen nodes
   -> Tree fs a                     -- ^ The tree to ascent.
@@ -153,7 +153,7 @@ type AscentDefault' fs gs a b  = (a, Sum fs (Tree gs b)) -> Tree gs b
 {- | Reconstruct the tree top-down. -}
 ascent'
   :: forall a b fs gs
-  .  (Lattice b, Apply Functor fs)
+  .  Apply Functor fs
   => AscentDefault' fs gs a b    -- ^ The default handler
   -> [Ascent' fs gs a b]         -- ^ The concrete handlers for chosen nodes
   -> Tree fs a                   -- ^ The tree to ascent.
@@ -266,7 +266,7 @@ loop' f = return . go
     go a = maybe (Just a) go $ f a
 
 {- | Construct a sequence of trees, covering given point, bottom-up. -}
-spineTo :: (Apply Foldable fs, Lattice i) => (i -> Bool) -> Tree fs i -> [Tree fs i]
+spineTo :: Apply Foldable fs => (i -> Bool) -> Tree fs i -> [Tree fs i]
 spineTo doesCover = go []
   where
     go acc branch@(info :< (toList -> children))
@@ -277,7 +277,7 @@ spineTo doesCover = go []
 
 -- | Locate the point and attempt update on spine up from that point.
 findAndUpdateFrom
-  :: (Lattice i, Apply Functor fs, Apply Foldable fs)
+  :: (Apply Functor fs, Apply Foldable fs)
   => (i -> Bool) -- Locator
   -> (i -> Maybe i)
   -> Tree fs i -> Tree fs i

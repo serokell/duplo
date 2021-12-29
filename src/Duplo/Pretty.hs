@@ -80,6 +80,7 @@ infixl 6 <.>
 color :: Int -> Doc -> Doc
 color c d = zeroWidthText begin <.> d <.> zeroWidthText end
   where
+    begin, end :: String
     begin = "\x1b[" ++ show (30 + c) ++ "m"
     end   = "\x1b[0m"
 

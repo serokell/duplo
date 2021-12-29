@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 4119a2ad0dd8a4bbac0e4c622da1263342e79b238981eeaff9c9e199ea56683e
+-- hash: cd6beede711e468dc4ed4eb7e444b524381a09010db1e9d7d5daf30ce8cca4b0
 
 name:           duplo
 version:        0.0.0
@@ -13,8 +13,6 @@ build-type:     Simple
 library
   exposed-modules:
       Duplo
-      Duplo.Error
-      Duplo.Example
       Duplo.Lattice
       Duplo.Pretty
       Duplo.Tree
@@ -57,7 +55,7 @@ library
       TypeOperators
       UndecidableInstances
       ViewPatterns
-  ghc-options: -freverse-errors -Wall -threaded
+  ghc-options: -freverse-errors -Weverything -Wno-missing-import-lists -Wno-unsafe -Wno-safe -Wno-implicit-prelude -Wno-missing-safe-haskell-mode -Wno-prepositive-qualified-module
   build-depends:
       base
     , comonad
