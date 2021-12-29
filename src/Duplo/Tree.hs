@@ -6,7 +6,9 @@
 module Duplo.Tree
   ( -- * AST
     Tree
+  , unsafeMake
   , make
+  , fastMake
   , match
   , only
   , gist
@@ -57,6 +59,8 @@ import Data.Foldable
 import Data.Function ((&))
 import Data.Maybe
 import Data.Sum
+
+import GHC.Stack (HasCallStack)
 
 import Duplo.Lattice
 import Duplo.Pretty
@@ -124,7 +128,7 @@ descent fallback transforms = restart
       match tree & maybe (go rest tree) \(i, f) -> do
         (i', f') <- handler i f
         f''      <- traverse restart f'
-        return $ make (i', f'')
+        pure $ fastMake i' f''
       `catchError` \case
         HandlerFailed -> go rest tree
         e@(CustomError _) -> throwError e
@@ -202,12 +206,33 @@ visit visitors = restart
     go [] (_ :< f) = do
       for_ f restart
 
-{- | Construct a tree out of annotation and a node (with subtrees). -}
-make :: (Lattice i, Element f fs, Foldable f, Apply Functor fs) => (i, f (Tree fs i)) -> Tree fs i
-make (i, f)
-  | any (not . (`leq` i)) (extract <$> toList f) = error "Tree.make: Subtrees must be less of equal"
-  | otherwise                                    = i :< inject f
+-- | Unsafely construct a tree out of annotation and a node (with subtrees).
+unsafeMake
+  :: (HasCallStack, Lattice i, Element f fs, Foldable f, Apply Functor fs)
+  => i
+  -> f (Tree fs i)
+  -> Tree fs i
+unsafeMake i f
+  | all ((`leq` i) . extract) f = fastMake i f
+  | otherwise                   = error "Tree.make: Subtrees must be less or equal"
+{-# INLINE unsafeMake #-}
+
+-- | Construct a tree out of annotation and a node (with subtrees).
+make
+  :: (Lattice i, Element f fs, Foldable f, Apply Functor fs)
+  => i
+  -> f (Tree fs i)
+  -> Maybe (Tree fs i)
+make i f
+  | all ((`leq` i) . extract) f = Just $ fastMake i f
+  | otherwise                   = Nothing
 {-# INLINE make #-}
+
+-- | Construct a tree out of annotation and a node (with subtrees). The
+-- precondition that all subtrees are less or equal is not checked.
+fastMake :: Element f fs => i -> f (Tree fs i) -> Tree fs i
+fastMake i f = i :< inject f
+{-# INLINE fastMake #-}
 
 {- | Attempt extraction of info and node from current root. -}
 match :: Element f fs => Tree fs i -> Maybe (i, f (Tree fs i))
