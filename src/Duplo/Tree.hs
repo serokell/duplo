@@ -50,9 +50,11 @@ module Duplo.Tree
 import Control.Applicative
 import Control.Comonad
 import Control.Comonad.Cofree
-import Control.Monad.Catch
+import Control.Exception (Exception)
+import Control.Monad.Except (MonadError (..))
 
 import Data.Foldable
+import Data.Function ((&))
 import Data.Maybe
 import Data.Sum
 
@@ -93,19 +95,21 @@ data Descent fs gs a b m where
     => DescentHandler f g a b fs m  -- ^ 1-layer transformation
     -> Descent fs gs a b m
 
-type DescentHandler f g a b fs m = (a, f (Tree fs a)) -> m (b, g (Tree fs a))
+type DescentHandler f g a b fs m = a -> f (Tree fs a) -> m (b, g (Tree fs a))
 type DescentDefault fs gs a b m
   =  (Tree fs a -> m (Tree gs b))
   ->  Tree fs a -> m (Tree gs b)
 
-data HandlerFailed = HandlerFailed
+data HandlerFailed e
+  = HandlerFailed
+  | CustomError e
   deriving stock Show
   deriving anyclass Exception
 
 {- | Reconstruct the tree top-down. -}
 descent
-  :: forall a b fs gs m
-  .  (MonadCatch m, Lattice b, Apply Functor gs, Apply Foldable gs, Apply Traversable gs)
+  :: forall a b fs gs e m
+  .  (MonadError (HandlerFailed e) m, Lattice b, Apply Functor gs, Apply Foldable gs, Apply Traversable gs)
   => DescentDefault fs gs a b m    -- ^ The default handler
   -> [Descent fs gs a b m]         -- ^ The concrete handlers for chosen nodes
   -> Tree fs a                     -- ^ The tree to ascent.
@@ -117,12 +121,13 @@ descent fallback transforms = restart
 
     go :: [Descent fs gs a b m] -> Tree fs a -> m (Tree gs b)
     go (Descent handler : rest) tree = do
-        (i,  f)  <- matchOrFail tree
-        (i', f') <- handler (i, f)
+      match tree & maybe (go rest tree) \(i, f) -> do
+        (i', f') <- handler i f
         f''      <- traverse restart f'
         return $ make (i', f'')
-      `catch` \HandlerFailed -> do
-        go rest tree
+      `catchError` \case
+        HandlerFailed -> go rest tree
+        e@(CustomError _) -> throwError e
 
     go [] tree = do
       fallback restart tree
@@ -178,21 +183,22 @@ data Visit fs a m where
 type VisitHandler f a fs m = (a, f (Tree fs a)) -> m ()
 
 visit
-  :: forall a fs m
-  .  (MonadCatch m, Apply Foldable fs)
-  => [Visit fs a m]         -- ^ The concrete handlers for chosen nodes
-  -> Tree fs a                     -- ^ The tree to ascent.
+  :: forall a fs e m
+  .  (MonadError (HandlerFailed e) m, Apply Foldable fs)
+  => [Visit fs a m]  -- ^ The concrete handlers for chosen nodes.
+  -> Tree fs a  -- ^ The tree to ascent.
   -> m ()
 visit visitors = restart
   where
     restart = go visitors
 
-    go (Visit handler : rest) tree = do
-        (a, f) <- matchOrFail tree
+    go (Visit handler : rest) tree =
+      match tree & maybe (go rest tree) \(a, f) -> do
         handler (a, f)
         for_ f restart
-      `catch` \HandlerFailed -> do
-        go rest tree
+      `catchError` \case
+        HandlerFailed -> go rest tree
+        e@(CustomError _) -> throwError e
     go [] (_ :< f) = do
       for_ f restart
 
@@ -209,10 +215,6 @@ match (i :< f) = do
   f' <- project f
   return (i, f')
 {-# INLINE match #-}
-
-matchOrFail :: (Element f fs, MonadThrow m) => Tree fs i -> m (i, f (Tree fs i))
-matchOrFail = maybe (throwM HandlerFailed) return . match
-{-# INLINE matchOrFail #-}
 
 {- | Attempt extraction of node from current root. -}
 layer :: Element f fs => Tree fs i -> Maybe (f (Tree fs i))
@@ -248,7 +250,7 @@ spineTo doesCover = go []
           deeperRes -> deeperRes
       | otherwise = []
 
--- | Locate the point and attepmt update on spine up from that point.
+-- | Locate the point and attempt update on spine up from that point.
 findAndUpdateFrom
   :: (Lattice i, Apply Functor fs, Apply Foldable fs)
   => (i -> Bool) -- Locator
@@ -294,11 +296,11 @@ usingScope
      )
   => Descent fs gs a b m
   -> Descent fs gs a b m
-usingScope (Descent action) = Descent $ \(a, f) -> do
+usingScope (Descent action) = Descent \a f -> do
   -- So. To unpack `Apply X fs` constraint to get `X f`, ypu do `apply :: (forall g. c g => g a -> b) -> Sum fs a -> b`.
   -- The problem is, we have `f a`, not `Sum fs a`. Which I clutch up here by calling `inject @_ @fs f`.
   apply @(Scoped a m (Tree fs a)) (before a) (inject @_ @fs f)
-  res <- action (a, f)
+  res <- action a f
   apply @(Scoped a m (Tree fs a)) (after a) (inject @_ @fs f)
   return res
 {-# INLINE usingScope #-}

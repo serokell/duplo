@@ -1,14 +1,13 @@
 name: duplo
 
 dependencies:
-  - comonad
   - base
-  - exceptions
+  - comonad
   - fastsum
   - free
+  - mtl
   - pretty
   - text
-  - transformers
 
 default-extensions:
   - AllowAmbiguousTypes
