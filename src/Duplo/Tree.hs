@@ -260,8 +260,8 @@ loop f = go
     go a = f a >>= maybe (return $ Just a) go
 
 {- | Apply a pure transform until it fails. -}
-loop' :: Monad m => (a -> Maybe a) -> a -> m (Maybe a)
-loop' f = return . go
+loop' :: (a -> Maybe a) -> a -> Maybe a
+loop' f = go
   where
     go a = maybe (Just a) go $ f a
 
