@@ -5,9 +5,9 @@ dependencies:
   - comonad
   - fastsum
   - free
-  - mtl
   - pretty
   - text
+  - transformers
 
 default-extensions:
   - AllowAmbiguousTypes

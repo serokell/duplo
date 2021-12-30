@@ -53,7 +53,7 @@ import Control.Applicative
 import Control.Comonad
 import Control.Comonad.Cofree
 import Control.Exception (Exception)
-import Control.Monad.Except (MonadError (..))
+import Control.Monad.Trans.Except (ExceptT, runExceptT)
 
 import Data.Foldable
 import Data.Function ((&))
@@ -99,24 +99,23 @@ data Descent fs gs a b m where
     => DescentHandler f g a b fs m  -- ^ 1-layer transformation
     -> Descent fs gs a b m
 
-type DescentHandler f g a b fs m = a -> f (Tree fs a) -> m (b, g (Tree fs a))
+type DescentHandler f g a b fs m
+  = a -> f (Tree fs a) -> ExceptT HandlerFailed m (b, g (Tree fs a))
 type DescentDefault fs gs a b m
   =  (Tree fs a -> m (Tree gs b))
   ->  Tree fs a -> m (Tree gs b)
 
-data HandlerFailed e
-  = HandlerFailed
-  | CustomError e
+data HandlerFailed = HandlerFailed
   deriving stock Show
   deriving anyclass Exception
 
 {- | Reconstruct the tree top-down. -}
 descent
-  :: forall a b fs gs e m
-  .  MonadError (HandlerFailed e) m
-  => DescentDefault fs gs a b m    -- ^ The default handler
-  -> [Descent fs gs a b m]         -- ^ The concrete handlers for chosen nodes
-  -> Tree fs a                     -- ^ The tree to ascent.
+  :: forall a b fs gs m
+  .  Monad m
+  => DescentDefault fs gs a b m  -- ^ The default handler
+  -> [Descent fs gs a b m]  -- ^ The concrete handlers for chosen nodes
+  -> Tree fs a  -- ^ The tree to ascent.
   -> m (Tree gs b)
 descent fallback transforms = restart
   where
@@ -125,13 +124,11 @@ descent fallback transforms = restart
 
     go :: [Descent fs gs a b m] -> Tree fs a -> m (Tree gs b)
     go (Descent handler : rest) tree = do
-      match tree & maybe (go rest tree) \(i, f) -> do
-        (i', f') <- handler i f
-        f''      <- traverse restart f'
-        pure $ fastMake i' f''
-      `catchError` \case
-        HandlerFailed -> go rest tree
-        e@(CustomError _) -> throwError e
+      let recover = go rest tree
+      match tree & maybe recover \(i, f) ->
+        runExceptT (handler i f) >>= \case
+          Left HandlerFailed -> recover
+          Right (i', f') -> fastMake i' <$> traverse restart f'
 
     go [] tree = do
       fallback restart tree
@@ -184,11 +181,11 @@ data Visit fs a m where
     => VisitHandler f a fs m  -- ^ 1-layer transformation
     -> Visit fs a m
 
-type VisitHandler f a fs m = (a, f (Tree fs a)) -> m ()
+type VisitHandler f a fs m = a -> f (Tree fs a) -> ExceptT HandlerFailed m ()
 
 visit
-  :: forall a fs e m
-  .  (MonadError (HandlerFailed e) m, Apply Foldable fs)
+  :: forall a fs m
+  .  (Monad m, Apply Foldable fs)
   => [Visit fs a m]  -- ^ The concrete handlers for chosen nodes.
   -> Tree fs a  -- ^ The tree to ascent.
   -> m ()
@@ -196,13 +193,12 @@ visit visitors = restart
   where
     restart = go visitors
 
-    go (Visit handler : rest) tree =
-      match tree & maybe (go rest tree) \(a, f) -> do
-        handler (a, f)
-        for_ f restart
-      `catchError` \case
-        HandlerFailed -> go rest tree
-        e@(CustomError _) -> throwError e
+    go (Visit handler : rest) tree = do
+      let recover = go rest tree
+      match tree & maybe recover \(a, f) ->
+        runExceptT (handler a f) >>= \case
+          Left HandlerFailed -> recover
+          Right () -> for_ f restart
     go [] (_ :< f) = do
       for_ f restart
 
@@ -302,7 +298,7 @@ orLeaveAsIs :: (a -> Maybe a) -> (a -> (a, Bool))
 orLeaveAsIs f a = maybe (a, False) (, True) (f a)
 
 {- | Ability to have some scoped calculations. -}
-class Monad m => Scoped i m a f where
+class Applicative m => Scoped i m a f where
   before :: i -> f a -> m ()
   after :: i -> f a -> m ()
 
@@ -310,23 +306,23 @@ class Monad m => Scoped i m a f where
   after _ _ = skip
 
 {- | Default implementation for `enter`/`leave`. -}
-skip :: Monad m => m ()
-skip = return ()
+skip :: Applicative f => f ()
+skip = pure ()
 
 {- | Convert a `Descent` into a `Scoped` Descent. -}
 usingScope
   :: forall a b fs gs m
   .  ( Monad m
-     , Apply (Scoped a m (Tree fs a)) fs
+     , Apply (Scoped a (ExceptT HandlerFailed m) (Tree fs a)) fs
      )
   => Descent fs gs a b m
   -> Descent fs gs a b m
 usingScope (Descent action) = Descent \a f -> do
   -- So. To unpack `Apply X fs` constraint to get `X f`, ypu do `apply :: (forall g. c g => g a -> b) -> Sum fs a -> b`.
   -- The problem is, we have `f a`, not `Sum fs a`. Which I clutch up here by calling `inject @_ @fs f`.
-  apply @(Scoped a m (Tree fs a)) (before a) (inject @_ @fs f)
+  apply @(Scoped a (ExceptT HandlerFailed m) (Tree fs a)) (before a) (inject @_ @fs f)
   res <- action a f
-  apply @(Scoped a m (Tree fs a)) (after a) (inject @_ @fs f)
+  apply @(Scoped a (ExceptT HandlerFailed m) (Tree fs a)) (after a) (inject @_ @fs f)
   return res
 {-# INLINE usingScope #-}
 

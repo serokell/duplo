@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: cd6beede711e468dc4ed4eb7e444b524381a09010db1e9d7d5daf30ce8cca4b0
+-- hash: aeca302abc8a2fb6b027654905f9be63b5cff5372e6b1fa6e24c8c5048e1098e
 
 name:           duplo
 version:        0.0.0
@@ -61,7 +61,7 @@ library
     , comonad
     , fastsum
     , free
-    , mtl
     , pretty
     , text
+    , transformers
   default-language: Haskell2010
