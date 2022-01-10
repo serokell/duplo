@@ -53,7 +53,8 @@ import Control.Applicative
 import Control.Comonad
 import Control.Comonad.Cofree
 import Control.Exception (Exception)
-import Control.Monad.Trans.Except (ExceptT, runExceptT)
+import Control.Monad (liftM)
+import Control.Monad.Trans.Except (ExceptT, catchE, runExceptT, throwE)
 
 import Data.Foldable
 import Data.Function ((&))
@@ -320,9 +321,10 @@ usingScope
 usingScope (Descent action) = Descent \a f -> do
   -- So. To unpack `Apply X fs` constraint to get `X f`, ypu do `apply :: (forall g. c g => g a -> b) -> Sum fs a -> b`.
   -- The problem is, we have `f a`, not `Sum fs a`. Which I clutch up here by calling `inject @_ @fs f`.
-  apply @(Scoped a (ExceptT HandlerFailed m) (Tree fs a)) (before a) (inject @_ @fs f)
-  res <- action a f
-  apply @(Scoped a (ExceptT HandlerFailed m) (Tree fs a)) (after a) (inject @_ @fs f)
+  let injected = inject @_ @fs f
+  apply @(Scoped a (ExceptT HandlerFailed m) (Tree fs a)) (before a) injected
+  res <- action a f `finallyE`
+    apply @(Scoped a (ExceptT HandlerFailed m) (Tree fs a)) (after a) injected
   return res
 {-# INLINE usingScope #-}
 
@@ -335,8 +337,6 @@ usingScope'
   => DescentDefault fs gs a b m
   -> DescentDefault fs gs a b m
 usingScope' action restart tree@(a :< f) = do
-  -- So. To unpack `Apply X fs` constraint to get `X f`, ypu do `apply :: (forall g. c g => g a -> b) -> Sum fs a -> b`.
-  -- The problem is, we have `f a`, not `Sum fs a`. Which I clutch up here by calling `inject @_ @fs f`.
   apply @(Scoped a m (Tree fs a)) (before a) f
   res <- action restart tree
   apply @(Scoped a m (Tree fs a)) (after a) f
@@ -374,3 +374,18 @@ collect tree@(_ :< f) =
     case match tree of
       Just it -> [it]
       Nothing -> []
+
+-- TODO: transformers 0.5.6.2, which is used in duplo, does not yet define such
+-- functions, present in transformers 0.6.0.2. We define them here instead. Once
+-- duplo is updated and uses a more recent version of transformers, consider
+-- removing `tryE` and `finallyE`.
+tryE :: Monad m => ExceptT e m a -> ExceptT e m (Either e a)
+tryE m = catchE (liftM Right m) (return . Left)
+{-# INLINE tryE #-}
+
+finallyE :: Monad m => ExceptT e m a -> ExceptT e m () -> ExceptT e m a
+finallyE m closer = do
+  res <- tryE m
+  closer
+  either throwE return res
+{-# INLINE finallyE #-}
