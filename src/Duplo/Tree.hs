@@ -6,7 +6,7 @@
 module Duplo.Tree
   ( -- * AST
     Tree
-  , unsafeMake
+  , makeIO
   , make
   , fastMake
   , match
@@ -52,16 +52,15 @@ module Duplo.Tree
 import Control.Applicative
 import Control.Comonad
 import Control.Comonad.Cofree
-import Control.Exception (Exception)
+import Control.Exception (Exception (..), throwIO)
 import Control.Monad (liftM)
+import Control.Monad.IO.Class (MonadIO (..))
 import Control.Monad.Trans.Except (ExceptT, catchE, runExceptT, throwE)
 
 import Data.Foldable
 import Data.Function ((&))
 import Data.Maybe
 import Data.Sum
-
-import GHC.Stack (HasCallStack)
 
 import Duplo.Lattice
 import Duplo.Pretty
@@ -108,7 +107,6 @@ type DescentDefault fs gs a b m
 
 data HandlerFailed = HandlerFailed
   deriving stock Show
-  deriving anyclass Exception
 
 {- | Reconstruct the tree top-down. -}
 descent
@@ -203,16 +201,24 @@ visit visitors = restart
     go [] (_ :< f) = do
       for_ f restart
 
+data TreeNotLessOrEqualException = TreeNotLessOrEqualException
+  deriving stock (Show)
+
+instance Exception TreeNotLessOrEqualException where
+  displayException TreeNotLessOrEqualException =
+    "Subtrees must be less or equal"
+
 -- | Unsafely construct a tree out of annotation and a node (with subtrees).
-unsafeMake
-  :: (HasCallStack, Lattice i, Element f fs, Foldable f, Apply Functor fs)
+-- Throws `TreeNotLessOrEqualException` if some node is not less or equal than
+-- another node, i.e., each node should be stricly contained within its parent
+-- node.
+makeIO
+  :: (Lattice i, Element f fs, Foldable f, Apply Functor fs, MonadIO m)
   => i
   -> f (Tree fs i)
-  -> Tree fs i
-unsafeMake i f
-  | all ((`leq` i) . extract) f = fastMake i f
-  | otherwise                   = error "Tree.make: Subtrees must be less or equal"
-{-# INLINE unsafeMake #-}
+  -> m (Tree fs i)
+makeIO i = maybe (liftIO $ throwIO TreeNotLessOrEqualException) pure . make i
+{-# INLINE makeIO #-}
 
 -- | Construct a tree out of annotation and a node (with subtrees).
 make
