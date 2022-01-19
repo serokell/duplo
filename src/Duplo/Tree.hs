@@ -6,7 +6,9 @@
 module Duplo.Tree
   ( -- * AST
     Tree
+  , makeIO
   , make
+  , fastMake
   , match
   , only
   , gist
@@ -50,9 +52,13 @@ module Duplo.Tree
 import Control.Applicative
 import Control.Comonad
 import Control.Comonad.Cofree
-import Control.Monad.Catch
+import Control.Exception (Exception (..), throwIO)
+import Control.Monad (liftM)
+import Control.Monad.IO.Class (MonadIO (..))
+import Control.Monad.Trans.Except (ExceptT, catchE, runExceptT, throwE)
 
 import Data.Foldable
+import Data.Function ((&))
 import Data.Maybe
 import Data.Sum
 
@@ -93,22 +99,22 @@ data Descent fs gs a b m where
     => DescentHandler f g a b fs m  -- ^ 1-layer transformation
     -> Descent fs gs a b m
 
-type DescentHandler f g a b fs m = (a, f (Tree fs a)) -> m (b, g (Tree fs a))
+type DescentHandler f g a b fs m
+  = a -> f (Tree fs a) -> ExceptT HandlerFailed m (b, g (Tree fs a))
 type DescentDefault fs gs a b m
   =  (Tree fs a -> m (Tree gs b))
   ->  Tree fs a -> m (Tree gs b)
 
 data HandlerFailed = HandlerFailed
   deriving stock Show
-  deriving anyclass Exception
 
 {- | Reconstruct the tree top-down. -}
 descent
   :: forall a b fs gs m
-  .  (MonadCatch m, Lattice b, Apply Functor gs, Apply Foldable gs, Apply Traversable gs)
-  => DescentDefault fs gs a b m    -- ^ The default handler
-  -> [Descent fs gs a b m]         -- ^ The concrete handlers for chosen nodes
-  -> Tree fs a                     -- ^ The tree to ascent.
+  .  Monad m
+  => DescentDefault fs gs a b m  -- ^ The default handler
+  -> [Descent fs gs a b m]  -- ^ The concrete handlers for chosen nodes
+  -> Tree fs a  -- ^ The tree to ascent.
   -> m (Tree gs b)
 descent fallback transforms = restart
   where
@@ -117,12 +123,11 @@ descent fallback transforms = restart
 
     go :: [Descent fs gs a b m] -> Tree fs a -> m (Tree gs b)
     go (Descent handler : rest) tree = do
-        (i,  f)  <- matchOrFail tree
-        (i', f') <- handler (i, f)
-        f''      <- traverse restart f'
-        return $ make (i', f'')
-      `catch` \HandlerFailed -> do
-        go rest tree
+      let recover = go rest tree
+      match tree & maybe recover \(i, f) ->
+        runExceptT (handler i f) >>= \case
+          Left HandlerFailed -> recover
+          Right (i', f') -> fastMake i' <$> traverse restart f'
 
     go [] tree = do
       fallback restart tree
@@ -144,7 +149,7 @@ type AscentDefault' fs gs a b  = (a, Sum fs (Tree gs b)) -> Tree gs b
 {- | Reconstruct the tree top-down. -}
 ascent'
   :: forall a b fs gs
-  .  (Lattice b, Apply Functor fs)
+  .  Apply Functor fs
   => AscentDefault' fs gs a b    -- ^ The default handler
   -> [Ascent' fs gs a b]         -- ^ The concrete handlers for chosen nodes
   -> Tree fs a                   -- ^ The tree to ascent.
@@ -175,33 +180,62 @@ data Visit fs a m where
     => VisitHandler f a fs m  -- ^ 1-layer transformation
     -> Visit fs a m
 
-type VisitHandler f a fs m = (a, f (Tree fs a)) -> m ()
+type VisitHandler f a fs m = a -> f (Tree fs a) -> ExceptT HandlerFailed m ()
 
 visit
   :: forall a fs m
-  .  (MonadCatch m, Apply Foldable fs)
-  => [Visit fs a m]         -- ^ The concrete handlers for chosen nodes
-  -> Tree fs a                     -- ^ The tree to ascent.
+  .  (Monad m, Apply Foldable fs)
+  => [Visit fs a m]  -- ^ The concrete handlers for chosen nodes.
+  -> Tree fs a  -- ^ The tree to ascent.
   -> m ()
 visit visitors = restart
   where
     restart = go visitors
 
     go (Visit handler : rest) tree = do
-        (a, f) <- matchOrFail tree
-        handler (a, f)
-        for_ f restart
-      `catch` \HandlerFailed -> do
-        go rest tree
+      let recover = go rest tree
+      match tree & maybe recover \(a, f) ->
+        runExceptT (handler a f) >>= \case
+          Left HandlerFailed -> recover
+          Right () -> for_ f restart
     go [] (_ :< f) = do
       for_ f restart
 
-{- | Construct a tree out of annotation and a node (with subtrees). -}
-make :: (Lattice i, Element f fs, Foldable f, Apply Functor fs) => (i, f (Tree fs i)) -> Tree fs i
-make (i, f)
-  | any (not . (`leq` i)) (extract <$> toList f) = error "Tree.make: Subtrees must be less of equal"
-  | otherwise                                    = i :< inject f
+data TreeNotLessOrEqualException = TreeNotLessOrEqualException
+  deriving stock (Show)
+
+instance Exception TreeNotLessOrEqualException where
+  displayException TreeNotLessOrEqualException =
+    "Subtrees must be less or equal"
+
+-- | Unsafely construct a tree out of annotation and a node (with subtrees).
+-- Throws `TreeNotLessOrEqualException` if some node is not less or equal than
+-- another node, i.e., each node should be stricly contained within its parent
+-- node.
+makeIO
+  :: (Lattice i, Element f fs, Foldable f, Apply Functor fs, MonadIO m)
+  => i
+  -> f (Tree fs i)
+  -> m (Tree fs i)
+makeIO i = maybe (liftIO $ throwIO TreeNotLessOrEqualException) pure . make i
+{-# INLINE makeIO #-}
+
+-- | Construct a tree out of annotation and a node (with subtrees).
+make
+  :: (Lattice i, Element f fs, Foldable f, Apply Functor fs)
+  => i
+  -> f (Tree fs i)
+  -> Maybe (Tree fs i)
+make i f
+  | all ((`leq` i) . extract) f = Just $ fastMake i f
+  | otherwise                   = Nothing
 {-# INLINE make #-}
+
+-- | Construct a tree out of annotation and a node (with subtrees). The
+-- precondition that all subtrees are less or equal is not checked.
+fastMake :: Element f fs => i -> f (Tree fs i) -> Tree fs i
+fastMake i f = i :< inject f
+{-# INLINE fastMake #-}
 
 {- | Attempt extraction of info and node from current root. -}
 match :: Element f fs => Tree fs i -> Maybe (i, f (Tree fs i))
@@ -209,10 +243,6 @@ match (i :< f) = do
   f' <- project f
   return (i, f')
 {-# INLINE match #-}
-
-matchOrFail :: (Element f fs, MonadThrow m) => Tree fs i -> m (i, f (Tree fs i))
-matchOrFail = maybe (throwM HandlerFailed) return . match
-{-# INLINE matchOrFail #-}
 
 {- | Attempt extraction of node from current root. -}
 layer :: Element f fs => Tree fs i -> Maybe (f (Tree fs i))
@@ -233,13 +263,13 @@ loop f = go
     go a = f a >>= maybe (return $ Just a) go
 
 {- | Apply a pure transform until it fails. -}
-loop' :: Monad m => (a -> Maybe a) -> a -> m (Maybe a)
-loop' f = return . go
+loop' :: (a -> Maybe a) -> a -> Maybe a
+loop' f = go
   where
     go a = maybe (Just a) go $ f a
 
 {- | Construct a sequence of trees, covering given point, bottom-up. -}
-spineTo :: (Apply Foldable fs, Lattice i) => (i -> Bool) -> Tree fs i -> [Tree fs i]
+spineTo :: Apply Foldable fs => (i -> Bool) -> Tree fs i -> [Tree fs i]
 spineTo doesCover = go []
   where
     go acc branch@(info :< (toList -> children))
@@ -248,9 +278,9 @@ spineTo doesCover = go []
           deeperRes -> deeperRes
       | otherwise = []
 
--- | Locate the point and attepmt update on spine up from that point.
+-- | Locate the point and attempt update on spine up from that point.
 findAndUpdateFrom
-  :: (Lattice i, Apply Functor fs, Apply Foldable fs)
+  :: (Apply Functor fs, Apply Foldable fs)
   => (i -> Bool) -- Locator
   -> (i -> Maybe i)
   -> Tree fs i -> Tree fs i
@@ -275,7 +305,7 @@ orLeaveAsIs :: (a -> Maybe a) -> (a -> (a, Bool))
 orLeaveAsIs f a = maybe (a, False) (, True) (f a)
 
 {- | Ability to have some scoped calculations. -}
-class Monad m => Scoped i m a f where
+class Applicative m => Scoped i m a f where
   before :: i -> f a -> m ()
   after :: i -> f a -> m ()
 
@@ -283,23 +313,24 @@ class Monad m => Scoped i m a f where
   after _ _ = skip
 
 {- | Default implementation for `enter`/`leave`. -}
-skip :: Monad m => m ()
-skip = return ()
+skip :: Applicative f => f ()
+skip = pure ()
 
 {- | Convert a `Descent` into a `Scoped` Descent. -}
 usingScope
   :: forall a b fs gs m
   .  ( Monad m
-     , Apply (Scoped a m (Tree fs a)) fs
+     , Apply (Scoped a (ExceptT HandlerFailed m) (Tree fs a)) fs
      )
   => Descent fs gs a b m
   -> Descent fs gs a b m
-usingScope (Descent action) = Descent $ \(a, f) -> do
+usingScope (Descent action) = Descent \a f -> do
   -- So. To unpack `Apply X fs` constraint to get `X f`, ypu do `apply :: (forall g. c g => g a -> b) -> Sum fs a -> b`.
   -- The problem is, we have `f a`, not `Sum fs a`. Which I clutch up here by calling `inject @_ @fs f`.
-  apply @(Scoped a m (Tree fs a)) (before a) (inject @_ @fs f)
-  res <- action (a, f)
-  apply @(Scoped a m (Tree fs a)) (after a) (inject @_ @fs f)
+  let injected = inject @_ @fs f
+  apply @(Scoped a (ExceptT HandlerFailed m) (Tree fs a)) (before a) injected
+  res <- action a f `finallyE`
+    apply @(Scoped a (ExceptT HandlerFailed m) (Tree fs a)) (after a) injected
   return res
 {-# INLINE usingScope #-}
 
@@ -312,8 +343,6 @@ usingScope'
   => DescentDefault fs gs a b m
   -> DescentDefault fs gs a b m
 usingScope' action restart tree@(a :< f) = do
-  -- So. To unpack `Apply X fs` constraint to get `X f`, ypu do `apply :: (forall g. c g => g a -> b) -> Sum fs a -> b`.
-  -- The problem is, we have `f a`, not `Sum fs a`. Which I clutch up here by calling `inject @_ @fs f`.
   apply @(Scoped a m (Tree fs a)) (before a) f
   res <- action restart tree
   apply @(Scoped a m (Tree fs a)) (after a) f
@@ -351,3 +380,18 @@ collect tree@(_ :< f) =
     case match tree of
       Just it -> [it]
       Nothing -> []
+
+-- TODO: transformers 0.5.6.2, which is used in duplo, does not yet define such
+-- functions, present in transformers 0.6.0.2. We define them here instead. Once
+-- duplo is updated and uses a more recent version of transformers, consider
+-- removing `tryE` and `finallyE`.
+tryE :: Monad m => ExceptT e m a -> ExceptT e m (Either e a)
+tryE m = catchE (liftM Right m) (return . Left)
+{-# INLINE tryE #-}
+
+finallyE :: Monad m => ExceptT e m a -> ExceptT e m () -> ExceptT e m a
+finallyE m closer = do
+  res <- tryE m
+  closer
+  either throwE return res
+{-# INLINE finallyE #-}

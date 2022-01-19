@@ -1,9 +1,8 @@
 name: duplo
 
 dependencies:
-  - comonad
   - base
-  - exceptions
+  - comonad
   - fastsum
   - free
   - pretty
@@ -46,7 +45,15 @@ default-extensions:
   - UndecidableInstances
   - ViewPatterns
 
-ghc-options: -freverse-errors -Wall -threaded
+ghc-options:
+  - -freverse-errors
+  - -Weverything
+  - -Wno-missing-import-lists
+  - -Wno-unsafe
+  - -Wno-safe
+  - -Wno-implicit-prelude
+  - -Wno-missing-safe-haskell-mode
+  - -Wno-prepositive-qualified-module
 
 library:
   source-dirs:

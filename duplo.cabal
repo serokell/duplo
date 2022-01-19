@@ -1,10 +1,10 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.33.0.
+-- This file has been generated from package.yaml by hpack version 0.34.4.
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 3fad7e4a3021371fb1d3737f6267eaf5f538392ba22884ebd53a5a333c54d681
+-- hash: aeca302abc8a2fb6b027654905f9be63b5cff5372e6b1fa6e24c8c5048e1098e
 
 name:           duplo
 version:        0.0.0
@@ -13,8 +13,6 @@ build-type:     Simple
 library
   exposed-modules:
       Duplo
-      Duplo.Error
-      Duplo.Example
       Duplo.Lattice
       Duplo.Pretty
       Duplo.Tree
@@ -22,12 +20,45 @@ library
       Paths_duplo
   hs-source-dirs:
       src/
-  default-extensions: AllowAmbiguousTypes ApplicativeDo BangPatterns BlockArguments ConstraintKinds DataKinds DeriveAnyClass DeriveFoldable DeriveFunctor DeriveTraversable DerivingStrategies DerivingVia EmptyCase FlexibleContexts FlexibleInstances FunctionalDependencies GADTs GeneralisedNewtypeDeriving LambdaCase MagicHash MultiParamTypeClasses NamedFieldPuns OverloadedStrings QuasiQuotes RankNTypes ScopedTypeVariables StandaloneDeriving TemplateHaskell TupleSections TypeApplications TypeFamilies TypeOperators UndecidableInstances ViewPatterns
-  ghc-options: -freverse-errors -Wall -threaded
+  default-extensions:
+      AllowAmbiguousTypes
+      ApplicativeDo
+      BangPatterns
+      BlockArguments
+      ConstraintKinds
+      DataKinds
+      DeriveAnyClass
+      DeriveFoldable
+      DeriveFunctor
+      DeriveTraversable
+      DerivingStrategies
+      DerivingVia
+      EmptyCase
+      FlexibleContexts
+      FlexibleInstances
+      FunctionalDependencies
+      GADTs
+      GeneralisedNewtypeDeriving
+      LambdaCase
+      MagicHash
+      MultiParamTypeClasses
+      NamedFieldPuns
+      OverloadedStrings
+      QuasiQuotes
+      RankNTypes
+      ScopedTypeVariables
+      StandaloneDeriving
+      TemplateHaskell
+      TupleSections
+      TypeApplications
+      TypeFamilies
+      TypeOperators
+      UndecidableInstances
+      ViewPatterns
+  ghc-options: -freverse-errors -Weverything -Wno-missing-import-lists -Wno-unsafe -Wno-safe -Wno-implicit-prelude -Wno-missing-safe-haskell-mode -Wno-prepositive-qualified-module
   build-depends:
       base
     , comonad
-    , exceptions
     , fastsum
     , free
     , pretty
