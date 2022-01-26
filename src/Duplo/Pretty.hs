@@ -41,6 +41,7 @@ instance Pretty Text where
 -- | Common instance.
 instance Pretty Doc where
   pp = id
+
 {- | A typeclass for pretty-printable functors.
 -}
 class Pretty1 p where
@@ -61,6 +62,15 @@ newtype PP a = PP { unPP :: a }
 
 instance Pretty a => Show (PP a) where
   show = show . pp . unPP
+
+-- | A wrapper to make `Pretty` instances from `Show` ones.
+--
+-- > data X a = X
+-- >   deriving Pretty via ShowPP (X a)
+newtype ShowPP a = ShowPP { unShowPP :: a }
+
+instance Show a => Pretty (ShowPP a) where
+  pp = pp . Text.pack . show . unShowPP
 
 {- | The class for annotations.
 -}
