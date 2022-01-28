@@ -27,6 +27,7 @@ module Duplo.Tree
   , Descent (..)
   , HandlerFailed (..)
   , descent
+  , descent'
   , changeInfo
   , leaveBe
   , loop
@@ -37,6 +38,7 @@ module Duplo.Tree
     -- * AST Folding
   , Visit (..)
   , visit
+  , visit'
   , collect
 
     -- * Lookup
@@ -57,6 +59,7 @@ import Control.Monad.Catch (MonadCatch (catch), MonadThrow (throwM))
 import Control.Monad.IO.Class (MonadIO (..))
 
 import Data.Foldable
+import Data.Function ((&))
 import Data.Maybe
 import Data.Sum
 
@@ -130,6 +133,26 @@ descent fallback transforms = restart
       fallback restart tree
 {-# INLINE descent #-}
 
+-- | Reconstruct the tree top-down. This may be used for functions that don't throw.
+descent'
+  :: forall a b fs gs m
+  .  Monad m
+  => DescentDefault fs gs a b m  -- ^ The default handler
+  -> [Descent fs gs a b m]  -- ^ The concrete handlers for chosen nodes
+  -> Tree fs a  -- ^ The tree to ascent.
+  -> m (Tree gs b)
+descent' fallback transforms = restart
+  where
+    restart :: Tree fs a -> m (Tree gs b)
+    restart = go transforms
+
+    go :: [Descent fs gs a b m] -> Tree fs a -> m (Tree gs b)
+    go (Descent handler : rest) tree =
+      match tree & maybe (go rest tree) \(i, f) -> do
+        (i', f') <- handler i f
+        fastMake i' <$> traverse restart f'
+    go [] tree = fallback restart tree
+
 data Ascent' fs gs a b where
   {- | Wrap the node (the adecent is for), by forgetting its type. -}
   Ascent'
@@ -197,6 +220,20 @@ visit visitors = restart
 
     go [] (_ :< f) = do
       for_ f restart
+
+visit'
+  :: forall a fs f
+  .  (Applicative f, Apply Foldable fs)
+  => [Visit fs a f]  -- ^ The concrete handlers for chosen nodes.
+  -> Tree fs a  -- ^ The tree to ascent.
+  -> f ()
+visit' visitors = restart
+  where
+    restart = go visitors
+
+    go (Visit handler : rest) tree =
+      match tree & maybe (go rest tree) \(a, f) -> handler a f *> for_ f restart
+    go [] (_ :< f) = for_ f restart
 
 data TreeNotLessOrEqualException = TreeNotLessOrEqualException
   deriving stock (Show)
