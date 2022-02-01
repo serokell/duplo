@@ -3,11 +3,11 @@ name: duplo
 dependencies:
   - base
   - comonad
+  - exceptions
   - fastsum
   - free
   - pretty
   - text
-  - transformers
 
 default-extensions:
   - AllowAmbiguousTypes

@@ -27,6 +27,7 @@ module Duplo.Tree
   , Descent (..)
   , HandlerFailed (..)
   , descent
+  , descent'
   , changeInfo
   , leaveBe
   , loop
@@ -37,6 +38,7 @@ module Duplo.Tree
     -- * AST Folding
   , Visit (..)
   , visit
+  , visit'
   , collect
 
     -- * Lookup
@@ -53,9 +55,8 @@ import Control.Applicative
 import Control.Comonad
 import Control.Comonad.Cofree
 import Control.Exception (Exception (..), throwIO)
-import Control.Monad (liftM)
+import Control.Monad.Catch (MonadCatch (catch), MonadThrow (throwM))
 import Control.Monad.IO.Class (MonadIO (..))
-import Control.Monad.Trans.Except (ExceptT, catchE, runExceptT, throwE)
 
 import Data.Foldable
 import Data.Function ((&))
@@ -99,19 +100,19 @@ data Descent fs gs a b m where
     => DescentHandler f g a b fs m  -- ^ 1-layer transformation
     -> Descent fs gs a b m
 
-type DescentHandler f g a b fs m
-  = a -> f (Tree fs a) -> ExceptT HandlerFailed m (b, g (Tree fs a))
+type DescentHandler f g a b fs m = a -> f (Tree fs a) -> m (b, g (Tree fs a))
 type DescentDefault fs gs a b m
   =  (Tree fs a -> m (Tree gs b))
   ->  Tree fs a -> m (Tree gs b)
 
 data HandlerFailed = HandlerFailed
   deriving stock Show
+  deriving anyclass Exception
 
 {- | Reconstruct the tree top-down. -}
 descent
   :: forall a b fs gs m
-  .  Monad m
+  .  MonadCatch m
   => DescentDefault fs gs a b m  -- ^ The default handler
   -> [Descent fs gs a b m]  -- ^ The concrete handlers for chosen nodes
   -> Tree fs a  -- ^ The tree to ascent.
@@ -123,15 +124,34 @@ descent fallback transforms = restart
 
     go :: [Descent fs gs a b m] -> Tree fs a -> m (Tree gs b)
     go (Descent handler : rest) tree = do
-      let recover = go rest tree
-      match tree & maybe recover \(i, f) ->
-        runExceptT (handler i f) >>= \case
-          Left HandlerFailed -> recover
-          Right (i', f') -> fastMake i' <$> traverse restart f'
+        (i,  f)  <- matchOrFail tree
+        (i', f') <- handler i f
+        fastMake i' <$> traverse restart f'
+      `catch` \HandlerFailed -> go rest tree
 
     go [] tree = do
       fallback restart tree
 {-# INLINE descent #-}
+
+-- | Reconstruct the tree top-down. This may be used for functions that don't throw.
+descent'
+  :: forall a b fs gs m
+  .  Monad m
+  => DescentDefault fs gs a b m  -- ^ The default handler
+  -> [Descent fs gs a b m]  -- ^ The concrete handlers for chosen nodes
+  -> Tree fs a  -- ^ The tree to ascent.
+  -> m (Tree gs b)
+descent' fallback transforms = restart
+  where
+    restart :: Tree fs a -> m (Tree gs b)
+    restart = go transforms
+
+    go :: [Descent fs gs a b m] -> Tree fs a -> m (Tree gs b)
+    go (Descent handler : rest) tree =
+      match tree & maybe (go rest tree) \(i, f) -> do
+        (i', f') <- handler i f
+        fastMake i' <$> traverse restart f'
+    go [] tree = fallback restart tree
 
 data Ascent' fs gs a b where
   {- | Wrap the node (the adecent is for), by forgetting its type. -}
@@ -180,11 +200,11 @@ data Visit fs a m where
     => VisitHandler f a fs m  -- ^ 1-layer transformation
     -> Visit fs a m
 
-type VisitHandler f a fs m = a -> f (Tree fs a) -> ExceptT HandlerFailed m ()
+type VisitHandler f a fs m = a -> f (Tree fs a) -> m ()
 
 visit
   :: forall a fs m
-  .  (Monad m, Apply Foldable fs)
+  .  (MonadCatch m, Apply Foldable fs)
   => [Visit fs a m]  -- ^ The concrete handlers for chosen nodes.
   -> Tree fs a  -- ^ The tree to ascent.
   -> m ()
@@ -193,13 +213,27 @@ visit visitors = restart
     restart = go visitors
 
     go (Visit handler : rest) tree = do
-      let recover = go rest tree
-      match tree & maybe recover \(a, f) ->
-        runExceptT (handler a f) >>= \case
-          Left HandlerFailed -> recover
-          Right () -> for_ f restart
+        (a, f) <- matchOrFail tree
+        handler a f
+        for_ f restart
+      `catch` \HandlerFailed -> go rest tree
+
     go [] (_ :< f) = do
       for_ f restart
+
+visit'
+  :: forall a fs f
+  .  (Applicative f, Apply Foldable fs)
+  => [Visit fs a f]  -- ^ The concrete handlers for chosen nodes.
+  -> Tree fs a  -- ^ The tree to ascent.
+  -> f ()
+visit' visitors = restart
+  where
+    restart = go visitors
+
+    go (Visit handler : rest) tree =
+      match tree & maybe (go rest tree) \(a, f) -> handler a f *> for_ f restart
+    go [] (_ :< f) = for_ f restart
 
 data TreeNotLessOrEqualException = TreeNotLessOrEqualException
   deriving stock (Show)
@@ -243,6 +277,10 @@ match (i :< f) = do
   f' <- project f
   return (i, f')
 {-# INLINE match #-}
+
+matchOrFail :: (Element f fs, MonadThrow m) => Tree fs i -> m (i, f (Tree fs i))
+matchOrFail = maybe (throwM HandlerFailed) pure . match
+{-# INLINE matchOrFail #-}
 
 {- | Attempt extraction of node from current root. -}
 layer :: Element f fs => Tree fs i -> Maybe (f (Tree fs i))
@@ -320,7 +358,7 @@ skip = pure ()
 usingScope
   :: forall a b fs gs m
   .  ( Monad m
-     , Apply (Scoped a (ExceptT HandlerFailed m) (Tree fs a)) fs
+     , Apply (Scoped a m (Tree fs a)) fs
      )
   => Descent fs gs a b m
   -> Descent fs gs a b m
@@ -328,9 +366,9 @@ usingScope (Descent action) = Descent \a f -> do
   -- So. To unpack `Apply X fs` constraint to get `X f`, ypu do `apply :: (forall g. c g => g a -> b) -> Sum fs a -> b`.
   -- The problem is, we have `f a`, not `Sum fs a`. Which I clutch up here by calling `inject @_ @fs f`.
   let injected = inject @_ @fs f
-  apply @(Scoped a (ExceptT HandlerFailed m) (Tree fs a)) (before a) injected
-  res <- action a f `finallyE`
-    apply @(Scoped a (ExceptT HandlerFailed m) (Tree fs a)) (after a) injected
+  apply @(Scoped a m (Tree fs a)) (before a) injected
+  res <- action a f
+  apply @(Scoped a m (Tree fs a)) (after a) injected
   return res
 {-# INLINE usingScope #-}
 
@@ -380,18 +418,3 @@ collect tree@(_ :< f) =
     case match tree of
       Just it -> [it]
       Nothing -> []
-
--- TODO: transformers 0.5.6.2, which is used in duplo, does not yet define such
--- functions, present in transformers 0.6.0.2. We define them here instead. Once
--- duplo is updated and uses a more recent version of transformers, consider
--- removing `tryE` and `finallyE`.
-tryE :: Monad m => ExceptT e m a -> ExceptT e m (Either e a)
-tryE m = catchE (liftM Right m) (return . Left)
-{-# INLINE tryE #-}
-
-finallyE :: Monad m => ExceptT e m a -> ExceptT e m () -> ExceptT e m a
-finallyE m closer = do
-  res <- tryE m
-  closer
-  either throwE return res
-{-# INLINE finallyE #-}
